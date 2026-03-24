@@ -34,6 +34,11 @@ export const sessionCommand = define({
 			short: 'i',
 			description: 'Load usage data for a specific session ID',
 		},
+		byFile: {
+			type: 'boolean',
+			description: 'Show usage per individual session file instead of per project',
+			default: false,
+		},
 	},
 	toKebab: true,
 	async run(ctx): Promise<void> {
@@ -72,6 +77,7 @@ export const sessionCommand = define({
 			offline: ctx.values.offline,
 			timezone: ctx.values.timezone,
 			locale: ctx.values.locale,
+			groupByFile: mergedOptions.byFile,
 		});
 
 		if (sessionData.length === 0) {
@@ -107,6 +113,7 @@ export const sessionCommand = define({
 					modelsUsed: data.modelsUsed,
 					modelBreakdowns: data.modelBreakdowns,
 					projectPath: data.projectPath,
+					...(mergedOptions.byFile && { project: data.projectPath }),
 				})),
 				totals: createTotalsObject(totals),
 			};
@@ -124,11 +131,14 @@ export const sessionCommand = define({
 			}
 		} else {
 			// Print header
-			logger.box('Claude Code Token Usage Report - By Session');
+			const headerTitle = mergedOptions.byFile
+				? 'Claude Code Token Usage Report - By File'
+				: 'Claude Code Token Usage Report - By Session';
+			logger.box(headerTitle);
 
 			// Create table with compact mode support
 			const tableConfig: UsageReportConfig = {
-				firstColumnName: 'Session',
+				firstColumnName: mergedOptions.byFile ? 'Project / File' : 'Session',
 				includeLastActivity: true,
 				dateFormatter: (dateStr: string) =>
 					formatDateCompact(dateStr, ctx.values.timezone, ctx.values.locale),
@@ -139,7 +149,9 @@ export const sessionCommand = define({
 			// Add session data
 			let maxSessionLength = 0;
 			for (const data of sessionData) {
-				const sessionDisplay = data.sessionId.split('-').slice(-2).join('-'); // Display last two parts of session ID
+				const sessionDisplay = mergedOptions.byFile
+					? `${data.projectPath}/${data.sessionId.split('-').slice(-2).join('-')}`
+					: data.sessionId.split('-').slice(-2).join('-'); // Display last two parts of session ID
 
 				maxSessionLength = Math.max(maxSessionLength, sessionDisplay.length);
 

@@ -745,6 +745,7 @@ export type LoadOptions = {
 	offline?: boolean; // Use offline mode for pricing
 	sessionDurationHours?: number; // Session block duration in hours
 	groupByProject?: boolean; // Group data by project instead of aggregating
+	groupByFile?: boolean; // Group session data by individual JSONL file instead of project directory
 	project?: string; // Filter to specific project name
 	startOfWeek?: WeekDay; // Start of week for weekly aggregation
 	timezone?: string; // Timezone for date grouping (e.g., 'UTC', 'America/New_York'). Defaults to system timezone
@@ -945,6 +946,9 @@ export async function loadSessionData(options?: LoadOptions): Promise<SessionUsa
 	// Track processed message+request combinations for deduplication
 	const processedHashes = new Set<string>();
 
+	// Whether to group by individual JSONL file instead of project directory
+	const groupByFile = options?.groupByFile ?? false;
+
 	// Collect all valid data entries with session info first
 	const allEntries: Array<{
 		data: UsageData;
@@ -961,11 +965,18 @@ export async function loadSessionData(options?: LoadOptions): Promise<SessionUsa
 		const relativePath = path.relative(baseDir, file);
 		const parts = relativePath.split(path.sep);
 
-		// Session ID is the directory name containing the JSONL file
-		const sessionId = parts[parts.length - 2] ?? 'unknown';
-		// Project path is everything before the session ID
-		const joinedPath = parts.slice(0, -2).join(path.sep);
-		const projectPath = joinedPath.length > 0 ? joinedPath : 'Unknown Project';
+		// Project name is the directory containing the JSONL file
+		const projectName = parts[parts.length - 2] ?? 'unknown';
+		// File session ID is the JSONL filename without extension (actual Claude Code session UUID)
+		const fileSessionId = path.basename(file, '.jsonl');
+
+		// When groupByFile is enabled, group by individual JSONL file;
+		// otherwise group by project directory (legacy behavior)
+		const sessionId = groupByFile ? fileSessionId : projectName;
+		const projectPath = groupByFile
+			? projectName
+			: (parts.slice(0, -2).join(path.sep) || 'Unknown Project');
+		const sessionKey = groupByFile ? `${projectName}/${fileSessionId}` : `${projectPath}/${projectName}`;
 
 		await processJSONLFileByLine(file, async (line) => {
 			try {
@@ -986,7 +997,6 @@ export async function loadSessionData(options?: LoadOptions): Promise<SessionUsa
 				// Mark this combination as processed
 				markAsProcessed(uniqueHash, processedHashes);
 
-				const sessionKey = `${projectPath}/${sessionId}`;
 				const cost =
 					fetcher != null ? await calculateCostForEntry(data, mode, fetcher) : (data.costUSD ?? 0);
 
