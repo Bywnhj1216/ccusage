@@ -4948,3 +4948,87 @@ if (import.meta.vitest != null) {
 		});
 	});
 }
+
+// groupByFile option tests
+if (import.meta.vitest != null) {
+	describe('loadSessionData with groupByFile option', () => {
+		const mockEntry = (tokens: { input: number; output: number }, costUSD: number): UsageData => ({
+			timestamp: createISOTimestamp('2024-01-15T10:00:00Z'),
+			message: {
+				usage: { input_tokens: tokens.input, output_tokens: tokens.output },
+				model: createModelName('claude-sonnet-4-20250514'),
+			},
+			costUSD,
+		});
+
+		it('groups by project directory by default (no groupByFile)', async () => {
+			await using fixture = await createFixture({
+				projects: {
+					'my-project': {
+						'session-uuid-1.jsonl': JSON.stringify(mockEntry({ input: 100, output: 50 }, 0.01)),
+						'session-uuid-2.jsonl': JSON.stringify(mockEntry({ input: 200, output: 80 }, 0.02)),
+					},
+				},
+			});
+
+			const result = await loadSessionData({ claudePath: fixture.path, mode: 'display' });
+
+			// Both files in the same project should be merged into one row
+			expect(result).toHaveLength(1);
+			expect(result[0]?.sessionId).toBe('my-project');
+			expect(result[0]?.inputTokens).toBe(300); // 100 + 200
+			expect(result[0]?.outputTokens).toBe(130); // 50 + 80
+		});
+
+		it('groups each JSONL file as a separate row when groupByFile is true', async () => {
+			await using fixture = await createFixture({
+				projects: {
+					'my-project': {
+						'session-uuid-1.jsonl': JSON.stringify(mockEntry({ input: 100, output: 50 }, 0.01)),
+						'session-uuid-2.jsonl': JSON.stringify(mockEntry({ input: 200, output: 80 }, 0.02)),
+					},
+				},
+			});
+
+			const result = await loadSessionData({
+				claudePath: fixture.path,
+				mode: 'display',
+				groupByFile: true,
+			});
+
+			// Each JSONL file becomes a separate row
+			expect(result).toHaveLength(2);
+			expect(result.find((r) => r.sessionId === 'session-uuid-1')).toBeTruthy();
+			expect(result.find((r) => r.sessionId === 'session-uuid-2')).toBeTruthy();
+			// Both should have the project name as projectPath
+			expect(result.every((r) => r.projectPath === 'my-project')).toBe(true);
+		});
+
+		it('separates files from different projects when groupByFile is true', async () => {
+			await using fixture = await createFixture({
+				projects: {
+					'project-alpha': {
+						'session-aaa.jsonl': JSON.stringify(mockEntry({ input: 100, output: 50 }, 0.01)),
+					},
+					'project-beta': {
+						'session-bbb.jsonl': JSON.stringify(mockEntry({ input: 300, output: 120 }, 0.03)),
+					},
+				},
+			});
+
+			const result = await loadSessionData({
+				claudePath: fixture.path,
+				mode: 'display',
+				groupByFile: true,
+			});
+
+			expect(result).toHaveLength(2);
+			const alpha = result.find((r) => r.sessionId === 'session-aaa');
+			const beta = result.find((r) => r.sessionId === 'session-bbb');
+			expect(alpha?.projectPath).toBe('project-alpha');
+			expect(beta?.projectPath).toBe('project-beta');
+			expect(alpha?.inputTokens).toBe(100);
+			expect(beta?.inputTokens).toBe(300);
+		});
+	});
+}
